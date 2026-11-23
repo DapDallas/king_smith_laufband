@@ -39,8 +39,13 @@ from .walking_pad import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Right after a command the pad keeps reporting the old speed/mode for a while.
+# Right after a command the pad keeps reporting the old values for a while.
+# Commanded values are shown until the pad confirms them or the hold expires.
 OPTIMISTIC_HOLD = 5.0  # seconds
+# After "start" the pad counts down a few seconds before the belt moves.
+START_HOLD = 10.0  # seconds
+# Poll this often while the belt runs, so speed and distance update live.
+ACTIVE_SCAN_INTERVAL = timedelta(seconds=1)
 
 type WalkingPadConfigEntry = ConfigEntry[WalkingPadCoordinator]
 
@@ -68,17 +73,19 @@ class WalkingPadCoordinator(DataUpdateCoordinator[WalkingPadData]):
         self, hass: HomeAssistant, entry: WalkingPadConfigEntry, ble_device: BLEDevice
     ) -> None:
         """Initialize the coordinator."""
+        self._idle_interval = timedelta(
+            seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        )
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=entry.title,
-            update_interval=timedelta(
-                seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-            ),
+            update_interval=self._idle_interval,
         )
         self.mac: str = entry.data[CONF_MAC].upper()
         self.api = WalkingPadApi(ble_device, self._handle_push, self._handle_disconnect)
+        self._held: dict[str, Any] = {}
         self._hold_until = 0.0
         self._previous: WalkingPadStatus | None = None
 
@@ -142,14 +149,21 @@ class WalkingPadCoordinator(DataUpdateCoordinator[WalkingPadData]):
             step_cadence=cadence,
             moving=status.speed > 0,
         )
-        if self.data is not None and time.monotonic() < self._hold_until:
-            data = replace(
-                data,
-                speed=self.data.speed,
-                mode=self.data.mode,
-                moving=self.data.moving,
-            )
+        data = self._apply_held(data)
+        self._set_interval(data)
         return data
+
+    def _apply_held(self, data: WalkingPadData) -> WalkingPadData:
+        """Keep showing commanded values until the pad confirms them."""
+        if time.monotonic() >= self._hold_until:
+            self._held.clear()
+        self._held = {k: v for k, v in self._held.items() if getattr(data, k) != v}
+        return replace(data, **self._held) if self._held else data
+
+    def _set_interval(self, data: WalkingPadData) -> None:
+        """Poll fast while the belt runs or a command is pending."""
+        active = data.moving or bool(self._held)
+        self.update_interval = ACTIVE_SCAN_INTERVAL if active else self._idle_interval
 
     def _fire_session_events(
         self, previous: WalkingPadStatus, status: WalkingPadStatus
@@ -183,19 +197,28 @@ class WalkingPadCoordinator(DataUpdateCoordinator[WalkingPadData]):
             )
 
     async def _command(
-        self, coro: Coroutine[Any, Any, None], **optimistic: Any
+        self,
+        coro: Coroutine[Any, Any, None],
+        hold: float = OPTIMISTIC_HOLD,
+        **optimistic: Any,
     ) -> None:
         try:
             await coro
         except WalkingPadError as err:
             raise HomeAssistantError(f"WalkingPad command failed: {err}") from err
-        if self.data is not None and optimistic:
-            self._hold_until = time.monotonic() + OPTIMISTIC_HOLD
-            self.async_set_updated_data(replace(self.data, **optimistic))
+        if self.data is None:
+            return
+        self._held = optimistic
+        self._hold_until = time.monotonic() + hold
+        data = replace(self.data, **optimistic)
+        self._set_interval(data)
+        self.async_set_updated_data(data)
 
     async def async_start(self) -> None:
         """Start the belt."""
-        await self._command(self.api.start(), mode=MODE_MANUAL, moving=True)
+        await self._command(
+            self.api.start(), hold=START_HOLD, mode=MODE_MANUAL, moving=True
+        )
 
     async def async_stop(self) -> None:
         """Stop the belt."""
