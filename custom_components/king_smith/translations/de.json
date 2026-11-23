@@ -1,0 +1,23 @@
+{
+    "config": {
+        "step": {
+            "device": {
+                "title": "WalkingPad einrichten",
+                "description": "Name und Bluetooth-Adresse des Laufbands eingeben.",
+                "data": {
+                    "name": "Name",
+                    "mac": "Bluetooth-Adresse"
+                }
+            }
+        },
+        "abort": {
+            "already_configured": "Dieses Gerät ist bereits eingerichtet."
+        }
+    },
+    "device_automation": {
+        "trigger_type": {
+            "session_start": "Sitzung gestartet",
+            "session_done": "Sitzung beendet"
+        }
+    }
+}

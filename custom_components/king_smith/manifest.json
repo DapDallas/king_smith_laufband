@@ -13,18 +13,19 @@
         }
     ],
     "codeowners": [
+        "@DapDallas",
         "@indiefan"
     ],
     "config_flow": true,
     "dependencies": [
         "bluetooth"
     ],
-    "documentation": "https://github.com/indiefan/king_smith",
+    "documentation": "https://github.com/DapDallas/king_smith_laufband",
     "iot_class": "local_polling",
-    "issue_tracker": "https://github.com/indiefan/king_smith/issues",
+    "issue_tracker": "https://github.com/DapDallas/king_smith_laufband/issues",
     "requirements": [
         "bleak>=0.18.0",
         "ph4-walkingpad>=0.0.7"
     ],
-    "version": "0.1.2"
+    "version": "0.2.0"
 }

@@ -1,8 +1,23 @@
 {
+    "config": {
+        "step": {
+            "device": {
+                "title": "Set up WalkingPad",
+                "description": "Enter a name and the Bluetooth address of the treadmill.",
+                "data": {
+                    "name": "Name",
+                    "mac": "Bluetooth address"
+                }
+            }
+        },
+        "abort": {
+            "already_configured": "This device is already configured."
+        }
+    },
     "device_automation": {
         "trigger_type": {
-            "session_start": "Session Started",
-            "session_done": "Session Completed"
+            "session_start": "Session started",
+            "session_done": "Session completed"
         }
     }
 }

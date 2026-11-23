@@ -1,57 +1,59 @@
-# King Smith Walking Pad
+# King Smith WalkingPad für Home Assistant
 
-[![GitHub Release][releases-shield]][releases]
-[![GitHub Activity][commits-shield]][commits]
-[![License][license-shield]](LICENSE)
-[![Community Forum][forum-shield]][forum]
+Lokale Steuerung von King-Smith-/WalkingPad-Laufbändern per Bluetooth. Kein Cloud-Zugriff, keine Hersteller-App nötig.
 
-[![BuyMeCoffee][buymecoffeebadge]][buymecoffee]
+Dieses Repo ist ein gepflegter Fork von [indiefan/king_smith](https://github.com/indiefan/king_smith), angepasst an aktuelle Home-Assistant-Versionen.
 
+## Funktionen
 
-Custom integration to connect Home Assistant with [King Smith Walking Pads][king_smith].
+- **Schalter** für das Laufband (Start/Stop)
+- **Number-Entity** für die Geschwindigkeit (km/h)
+- **Sensoren** für Distanz, Zeit, Geschwindigkeit und Schritte
+- **Geräte-Trigger** `Sitzung gestartet` und `Sitzung beendet` für Automationen
 
-Currently this integration adds a switch for main belt and a number entity to control/monitor the belt speed (in mph).
+## Voraussetzungen
 
-This integration discovers/connects to the device using bluetooth (you may need to configure a bluetooth proxy like an ESP32).
+- Home Assistant **2024.4** oder neuer
+- Bluetooth in Home Assistant: ein lokaler Adapter oder ein [ESP32 als Bluetooth-Proxy](https://esphome.io/components/bluetooth_proxy.html) in Reichweite des Laufbands
+- Das Laufband ist an und **nicht** mit einem anderen Gerät verbunden (Handy-App, Mac, ...). Es akzeptiert nur eine BLE-Verbindung gleichzeitig.
 
-It has been tested with a C2 (the model I personally own), but is likely to work with other models supported by the underlying library.
+## Installation über HACS
 
-In order for the device to be connected to HA, it must not be connected to another device (e.g. the mobile app). If it is already configured via the mobile app, you will have to disconnect it before using it in HA.
+1. HACS öffnen, oben rechts Menü (drei Punkte) → **Benutzerdefinierte Repositories**.
+2. `https://github.com/DapDallas/king_smith_laufband` eintragen, Kategorie **Integration**.
+3. **King Smith Walking Pad** herunterladen und Home Assistant neu starten.
 
-## Installation
+## Manuelle Installation
 
-1. Using the tool of choice open the directory (folder) for your HA configuration (where you find `configuration.yaml`).
-1. If you do not have a `custom_components` directory (folder) there, you need to create it.
-1. In the `custom_components` directory (folder) create a new folder called `king_smith`.
-1. Download _all_ the files from the `custom_components/king_smith/` directory (folder) in this repository.
-1. Place the files you downloaded in the new directory (folder) you created.
-1. Restart Home Assistant
-1. Click on `Settings` and then `Devices & services`
-1. If the treadmill is on and not currently connected to another device, it should show up in the `Discovered` list. Click `configure` and give it a name.
+Den Ordner `custom_components/king_smith` in das Konfigurationsverzeichnis von Home Assistant kopieren (dort, wo `configuration.yaml` liegt) und neu starten.
 
-## Configuration is done in the UI
+| Zugriff | Pfad |
+|---|---|
+| Home Assistant OS, Add-ons (SSH, File editor, Studio Code Server) | `/homeassistant/custom_components/king_smith` |
+| Home Assistant Core/Container, Samba-Share `config` | `/config/custom_components/king_smith` |
 
-## Verified Supported Models
+## Einrichtung
 
-* C2
-* A1 Pro
+1. **Einstellungen → Geräte & Dienste.** Wird das Laufband per Bluetooth erkannt, erscheint es unter **Entdeckt**. Auf **Konfigurieren** klicken, einen Namen vergeben, fertig.
+2. Erscheint nichts: **Integration hinzufügen → King Smith Walking Pad** und Name sowie Bluetooth-Adresse (MAC) manuell eintragen. Die Adresse zeigt Home Assistant unter **Einstellungen → Geräte & Dienste → Bluetooth → Konfigurieren → Advertisement Monitor** beim Gerät `WalkingPad` (oder `KS-...`).
 
-(if you have a King Smith treadmill and would like to verify support, please reach out)
+Erkannt werden Geräte mit dem Bluetooth-Namen `WalkingPad`, `KS-BL*` und `KS-ST-*`.
 
-## Contributions are welcome!
+## Getestet
 
-If you want to contribute to this please read the [Contribution guidelines](CONTRIBUTING.md)
+- WalkingPad C2 und A1 Pro (laut Original-Projekt)
+- Einrichtung mit einem WalkingPad, das sich als `WalkingPad` mit Service `fe00` meldet (Protokoll aus [ph4-walkingpad](https://github.com/ph4r05/ph4-walkingpad))
 
-***
+Läuft es mit einem weiteren Modell, gerne ein Issue anlegen.
 
-[king_smith]: https://github.com/ludeeus/integration_blueprint
-[buymecoffee]: https://www.buymeacoffee.com/indiefan
-[buymecoffeebadge]: https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg?style=for-the-badge
-[commits-shield]: https://img.shields.io/github/commit-activity/y/indiefan/king_smith.svg?style=for-the-badge
-[commits]: https://github.com/indiefan/king_smith/commits/main
-[exampleimg]: example.png
-[forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
-[forum]: https://community.home-assistant.io/
-[license-shield]: https://img.shields.io/github/license/indiefan/king_smith.svg?style=for-the-badge
-[releases-shield]: https://img.shields.io/github/release/indiefan/king_smith.svg?style=for-the-badge
-[releases]: https://github.com/indiefan/king_smith/releases
+## Änderungen gegenüber dem Original
+
+- Config-Flow an aktuelle Home-Assistant-Versionen angepasst (`ConfigFlowResult`, keine veraltete `CONNECTION_CLASS`), damit die Integration überhaupt geladen wird
+- Manueller Einrichtungsschritt (Name und MAC), falls die Bluetooth-Erkennung nicht greift
+- Deutsche und englische Texte für den Einrichtungsdialog
+- Import von `UnitOfTime` auf `homeassistant.const` umgestellt
+- Entwicklungsballast aus dem Template entfernt (Devcontainer, Skripte, Lint-Workflow)
+
+## Credits und Lizenz
+
+Original von [Marke Hallowell (indiefan)](https://github.com/indiefan/king_smith), auf Basis des [integration_blueprint](https://github.com/ludeeus/integration_blueprint). Die Bluetooth-Kommunikation übernimmt [ph4-walkingpad](https://github.com/ph4r05/ph4-walkingpad). Lizenz: MIT, siehe [LICENSE](LICENSE).

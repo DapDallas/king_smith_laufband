@@ -7,10 +7,10 @@ from homeassistant.components.sensor import (
     SensorStateClass,
     RestoreSensor,
 )
-from homeassistant.components.sensor.const import UnitOfTime
+
 from homeassistant.config_entries import ConfigEntry
 
-from homeassistant.const import CONF_NAME, UnitOfLength, UnitOfSpeed
+from homeassistant.const import CONF_NAME, UnitOfLength, UnitOfSpeed, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from custom_components.king_smith.const import DOMAIN
