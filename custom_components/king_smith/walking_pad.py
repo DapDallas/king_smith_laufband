@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import logging
 import time
 
+from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import (
@@ -32,7 +33,10 @@ MODE_STANDBY = 2
 
 # The pad drops commands that arrive too quickly after each other.
 MIN_COMMAND_SPACING = 0.7  # seconds
-STATUS_TIMEOUT = 5.0  # seconds
+STATUS_TIMEOUT = 2.0  # seconds per attempt
+STATUS_ATTEMPTS = 3
+# Give the pad a moment after subscribing before the first command.
+SETTLE_DELAY = 1.0  # seconds
 
 
 class WalkingPadError(Exception):
@@ -87,6 +91,8 @@ class WalkingPadApi:
         self._lock = asyncio.Lock()
         self._last_command = 0.0
         self._status_waiter: asyncio.Future[WalkingPadStatus] | None = None
+        self._write_char: BleakGATTCharacteristic | None = None
+        self._write_response = False
 
     @property
     def address(self) -> str:
@@ -116,11 +122,48 @@ class WalkingPadApi:
                     disconnected_callback=self._on_disconnect,
                     ble_device_callback=lambda: self._ble_device,
                 )
-                await client.start_notify(CHAR_NOTIFY, self._on_notify)
+                notify_char, write_char = self._find_characteristics(client)
+                await client.start_notify(notify_char, self._on_notify)
             except (BleakError, TimeoutError) as err:
                 raise WalkingPadError(f"Could not connect: {err}") from err
             self._client = client
-            _LOGGER.debug("Connected to %s", self.address)
+            self._write_char = write_char
+            # Write without response unless the pad only supports writes with one.
+            self._write_response = "write-without-response" not in write_char.properties
+            _LOGGER.debug(
+                "Connected to %s (notify %s, write %s, with response: %s)",
+                self.address,
+                notify_char.handle,
+                write_char.handle,
+                self._write_response,
+            )
+            await asyncio.sleep(SETTLE_DELAY)
+            self._last_command = time.monotonic()
+
+    @staticmethod
+    def _find_characteristics(
+        client: BleakClientWithServiceCache,
+    ) -> tuple[BleakGATTCharacteristic, BleakGATTCharacteristic]:
+        """Find the notify (FE01) and write (FE02) characteristics."""
+        notify_char = write_char = None
+        for service in client.services:
+            for char in service.characteristics:
+                _LOGGER.debug(
+                    "Service %s, characteristic %s (handle %s): %s",
+                    service.uuid,
+                    char.uuid,
+                    char.handle,
+                    ",".join(char.properties),
+                )
+                if char.uuid == CHAR_NOTIFY and notify_char is None:
+                    if {"notify", "indicate"} & set(char.properties):
+                        notify_char = char
+                elif char.uuid == CHAR_WRITE and write_char is None:
+                    if {"write", "write-without-response"} & set(char.properties):
+                        write_char = char
+        if notify_char is None or write_char is None:
+            raise BleakError("WalkingPad characteristics FE01/FE02 not found")
+        return notify_char, write_char
 
     async def disconnect(self) -> None:
         """Close the connection."""
@@ -139,6 +182,7 @@ class WalkingPadApi:
         self._disconnect_callback()
 
     def _on_notify(self, _sender: object, data: bytearray) -> None:
+        _LOGGER.debug("Received %s", data.hex())
         status = WalkingPadStatus.from_bytes(data)
         if status is None:
             _LOGGER.debug("Ignoring message %s", data.hex())
@@ -150,13 +194,20 @@ class WalkingPadApi:
 
     async def _send(self, command: bytes) -> None:
         """Send a command, caller must hold the lock."""
-        if self._client is None or not self._client.is_connected:
+        if (
+            self._client is None
+            or not self._client.is_connected
+            or self._write_char is None
+        ):
             raise WalkingPadError("Not connected")
         wait = MIN_COMMAND_SPACING - (time.monotonic() - self._last_command)
         if wait > 0:
             await asyncio.sleep(wait)
+        _LOGGER.debug("Sending %s", command.hex())
         try:
-            await self._client.write_gatt_char(CHAR_WRITE, command)
+            await self._client.write_gatt_char(
+                self._write_char, command, response=self._write_response
+            )
         except BleakError as err:
             raise WalkingPadError(f"Could not send command: {err}") from err
         finally:
@@ -172,12 +223,17 @@ class WalkingPadApi:
         async with self._lock:
             self._status_waiter = asyncio.get_running_loop().create_future()
             try:
-                await self._send(_command(0xA2, 0x00, 0x00))
-                async with asyncio.timeout(STATUS_TIMEOUT):
-                    return await self._status_waiter
-            except TimeoutError as err:
-                raise WalkingPadError("No status received") from err
+                for _ in range(STATUS_ATTEMPTS):
+                    await self._send(_command(0xA2, 0x00, 0x00))
+                    try:
+                        async with asyncio.timeout(STATUS_TIMEOUT):
+                            return await asyncio.shield(self._status_waiter)
+                    except TimeoutError:
+                        _LOGGER.debug("No status from %s, retrying", self.address)
+                raise WalkingPadError("No status received")
             finally:
+                if not self._status_waiter.done():
+                    self._status_waiter.cancel()
                 self._status_waiter = None
 
     async def set_mode(self, mode: int) -> None:
