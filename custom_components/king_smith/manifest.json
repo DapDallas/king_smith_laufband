@@ -25,5 +25,5 @@
     "iot_class": "local_polling",
     "issue_tracker": "https://github.com/DapDallas/king_smith_laufband/issues",
     "requirements": [],
-    "version": "0.3.0"
+    "version": "1.0.0"
 }

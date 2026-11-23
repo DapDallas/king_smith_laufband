@@ -1,0 +1,9 @@
+# Test dependencies (pytest-homeassistant-custom-component pins Home Assistant)
+pytest-homeassistant-custom-component==0.13.316
+# Needed to import Home Assistant's bluetooth component in tests
+aiousbwatcher==1.1.1
+bleak-retry-connector==4.7.1
+bluetooth-adapters==2.4.0
+bluetooth-auto-recovery==1.6.4
+habluetooth==6.1.0
+pyserial==3.5
