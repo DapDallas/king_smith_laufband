@@ -1,133 +1,206 @@
-"""The Walking Pad Coordinator."""
-from datetime import datetime, timezone
+"""Coordinator for the King Smith WalkingPad."""
+
+from __future__ import annotations
+
+from collections.abc import Coroutine
+from dataclasses import dataclass, replace
+from datetime import timedelta
 import logging
 import time
+from typing import Any
 
+from bleak.backends.device import BLEDevice
 
-from homeassistant.const import (
-    ATTR_DEVICE_ID,
-    ATTR_DOMAIN,
+from homeassistant.components import bluetooth
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_DEVICE_ID, CONF_MAC, CONF_TYPE
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
+
+from .const import (
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    EVENT_SESSION_DONE,
+    EVENT_SESSION_START,
+    SESSION_DONE,
+    SESSION_START,
 )
-
-from homeassistant.core import CALLBACK_TYPE, HassJob, HomeAssistant, callback
-from homeassistant.helpers.event import async_call_later
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-
-from ph4_walkingpad.pad import WalkingPadCurStatus
-
-from .const import DOMAIN, EVENT_SESSION_START, EVENT_SESSION_DONE
-from .walking_pad import WalkingPadApi
+from .walking_pad import (
+    MODE_MANUAL,
+    MODE_STANDBY,
+    WalkingPadApi,
+    WalkingPadError,
+    WalkingPadStatus,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-NEVER_TIME = -86400.0
-DEBOUNCE_SECONDS = 1.0
+# Right after a command the pad keeps reporting the old speed/mode for a while.
+OPTIMISTIC_HOLD = 5.0  # seconds
+
+type WalkingPadConfigEntry = ConfigEntry[WalkingPadCoordinator]
 
 
-class WalkingPadCoordinator(DataUpdateCoordinator[None]):
-    """Data coordinator for receiving Walking Pad updates."""
+@dataclass(frozen=True, slots=True)
+class WalkingPadData:
+    """State of the pad as exposed to the entities."""
+
+    speed: float
+    mode: int
+    belt_state: int
+    time: int
+    distance: float
+    steps: int
+    step_cadence: float
+    moving: bool
+
+
+class WalkingPadCoordinator(DataUpdateCoordinator[WalkingPadData]):
+    """Polls the pad and turns its status into entity state and events."""
+
+    config_entry: WalkingPadConfigEntry
 
     def __init__(
-        self,
-        hass: HomeAssistant,
-        walking_pad_api: WalkingPadApi,
-        device_id: str,
+        self, hass: HomeAssistant, entry: WalkingPadConfigEntry, ble_device: BLEDevice
     ) -> None:
-        """Initialise the coordinator."""
+        """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
-            name=DOMAIN,
+            config_entry=entry,
+            name=entry.title,
+            update_interval=timedelta(
+                seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            ),
         )
-        self._device_id = device_id
-        self._last_status = None
-        self._last_session = {}
-        self._walking_pad_api = walking_pad_api
-        self._walking_pad_api.register_status_callback(self._async_handle_update)
-        self._walking_pad_api.register_status_callback(self._create_events)
-        self.connected = self._walking_pad_api.connected
-        self._last_update_time = NEVER_TIME
-        self._debounce_cancel: CALLBACK_TYPE | None = None
-        self._debounced_update_job = HassJob(
-            self._async_handle_debounced_update,
-            f"Walking Pad {walking_pad_api.mac} BLE debounced update",
-        )
+        self.mac: str = entry.data[CONF_MAC].upper()
+        self.api = WalkingPadApi(ble_device, self._handle_push, self._handle_disconnect)
+        self._hold_until = 0.0
+        self._previous: WalkingPadStatus | None = None
 
-    @callback
-    def _create_events(self, status: WalkingPadCurStatus) -> None:
-        """Handle events for a Walking session."""
-        if self._last_status is None:
-            self._last_status = status
-            return
-
-        # Session has ended when time / duration is lower then before
-        if self._last_status.time > 0 and self._last_status.time > status.time:
-            # create last session info
-            self._last_session = {
-                "start_time": datetime.fromtimestamp(
-                    time.time() - self._last_status.time, timezone.utc
-                ),
-                "end_time": datetime.fromtimestamp(time.time(), timezone.utc),
-                "duration": self._last_status.time,
-                "steps": self._last_status.steps,
-                "dist": self._last_status.dist / 100,
-                "avg_step_cadence": (self._last_status.steps / (float(self._last_status.time)/60)),
-                "avg_speed": (
-                    float(self._last_status.dist / 100)
-                    / (float(self._last_status.time) / 3600.0)
-                ),
-            }
-
-            # create event
-            data = {
-                "identifiers": {(DOMAIN, self._walking_pad_api.mac)},
-                ATTR_DEVICE_ID: self._device_id,
-                ATTR_DOMAIN: DOMAIN,
-                **self._last_session,
-            }
-            self.hass.bus.fire(EVENT_SESSION_DONE, data)
-        elif self._last_status.time == 0 and status.time > 0:
-            # create event
-            data = {
-                "identifiers": {(DOMAIN, self._walking_pad_api.mac)},
-                ATTR_DEVICE_ID: self._device_id,
-                ATTR_DOMAIN: DOMAIN,
-                "start_time": datetime.fromtimestamp(time.time(), timezone.utc),
-            }
-            self.hass.bus.fire(EVENT_SESSION_START, data)
-
-        self._last_status = status
-
-    @callback
-    def _async_handle_debounced_update(self, _now: datetime) -> None:
-        """Handle debounced update."""
-        self._debounce_cancel = None
-        self._last_update_time = time.monotonic()
-        self.async_set_updated_data(None)
-
-    @callback
-    def _async_handle_update(self, status: WalkingPadCurStatus) -> None:
-        """Just trigger the callbacks."""
-        self.connected = True
-        previous_last_updated_time = self._last_update_time
-        self._last_update_time = time.monotonic()
-        if self._last_update_time - previous_last_updated_time >= DEBOUNCE_SECONDS:
-            self.async_set_updated_data(None)
-            return
-        if self._debounce_cancel is None:
-            self._debounce_cancel = async_call_later(
-                self.hass, DEBOUNCE_SECONDS, self._debounced_update_job
+    async def _async_update_data(self) -> WalkingPadData:
+        if not self.api.connected:
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, self.mac, connectable=True
             )
-
-    @callback
-    def _async_handle_disconnect(self) -> None:
-        """Trigger the callbacks for disconnected."""
-        self.connected = False
-        self.async_update_listeners()
+            if ble_device is None:
+                raise UpdateFailed(
+                    "WalkingPad is not in Bluetooth range or switched off"
+                )
+            self.api.set_ble_device(ble_device)
+        try:
+            await self.api.connect()
+            status = await self.api.request_status()
+        except WalkingPadError as err:
+            await self.api.disconnect()
+            raise UpdateFailed(str(err)) from err
+        return self._process(status)
 
     async def async_shutdown(self) -> None:
-        """Shutdown the coordinator."""
-        if self._debounce_cancel is not None:
-            self._debounce_cancel()
-            self._debounce_cancel = None
+        """Disconnect when the entry is unloaded."""
         await super().async_shutdown()
+        await self.api.disconnect()
+
+    @callback
+    def _handle_push(self, status: WalkingPadStatus) -> None:
+        """Status arrived without being asked for."""
+        self.async_set_updated_data(self._process(status))
+
+    @callback
+    def _handle_disconnect(self) -> None:
+        self.async_update_listeners()
+
+    def _process(self, status: WalkingPadStatus) -> WalkingPadData:
+        previous = self._previous
+        self._previous = status
+
+        cadence = 0.0
+        if (
+            previous is not None
+            and status.speed > 0
+            and status.time > previous.time
+            and status.steps >= previous.steps
+        ):
+            cadence = round(
+                (status.steps - previous.steps) * 60 / (status.time - previous.time), 1
+            )
+
+        if previous is not None:
+            self._fire_session_events(previous, status)
+
+        data = WalkingPadData(
+            speed=status.speed,
+            mode=status.mode,
+            belt_state=status.belt_state,
+            time=status.time,
+            distance=status.distance,
+            steps=status.steps,
+            step_cadence=cadence,
+            moving=status.speed > 0,
+        )
+        if self.data is not None and time.monotonic() < self._hold_until:
+            data = replace(
+                data,
+                speed=self.data.speed,
+                mode=self.data.mode,
+                moving=self.data.moving,
+            )
+        return data
+
+    def _fire_session_events(
+        self, previous: WalkingPadStatus, status: WalkingPadStatus
+    ) -> None:
+        device = dr.async_get(self.hass).async_get_device(
+            identifiers={(DOMAIN, self.mac)}
+        )
+        base = {ATTR_DEVICE_ID: device.id if device else None}
+        now = dt_util.utcnow()
+
+        if previous.time > 0 and status.time < previous.time:
+            minutes = previous.time / 60
+            self.hass.bus.async_fire(
+                EVENT_SESSION_DONE,
+                {
+                    **base,
+                    CONF_TYPE: SESSION_DONE,
+                    "start_time": (now - timedelta(seconds=previous.time)).isoformat(),
+                    "end_time": now.isoformat(),
+                    "duration": previous.time,
+                    "steps": previous.steps,
+                    "dist": previous.distance,
+                    "avg_step_cadence": round(previous.steps / minutes, 1),
+                    "avg_speed": round(previous.distance / (minutes / 60), 2),
+                },
+            )
+        elif previous.time == 0 and status.time > 0:
+            self.hass.bus.async_fire(
+                EVENT_SESSION_START,
+                {**base, CONF_TYPE: SESSION_START, "start_time": now.isoformat()},
+            )
+
+    async def _command(
+        self, coro: Coroutine[Any, Any, None], **optimistic: Any
+    ) -> None:
+        try:
+            await coro
+        except WalkingPadError as err:
+            raise HomeAssistantError(f"WalkingPad command failed: {err}") from err
+        if self.data is not None and optimistic:
+            self._hold_until = time.monotonic() + OPTIMISTIC_HOLD
+            self.async_set_updated_data(replace(self.data, **optimistic))
+
+    async def async_start(self) -> None:
+        """Start the belt."""
+        await self._command(self.api.start(), mode=MODE_MANUAL, moving=True)
+
+    async def async_stop(self) -> None:
+        """Stop the belt."""
+        await self._command(self.api.stop(), speed=0.0, mode=MODE_STANDBY, moving=False)
+
+    async def async_set_speed(self, speed: float) -> None:
+        """Change the belt speed."""
+        await self._command(self.api.set_speed(speed), speed=speed)

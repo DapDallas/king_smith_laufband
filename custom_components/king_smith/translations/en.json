@@ -1,17 +1,74 @@
 {
     "config": {
+        "flow_title": "{name}",
         "step": {
-            "device": {
+            "user": {
                 "title": "Set up WalkingPad",
-                "description": "Enter a name and the Bluetooth address of the treadmill.",
+                "description": "Pick a treadmill found via Bluetooth or enter its Bluetooth address (e.g. AA:BB:CC:DD:EE:FF).",
                 "data": {
                     "name": "Name",
                     "mac": "Bluetooth address"
                 }
+            },
+            "bluetooth_confirm": {
+                "title": "Set up WalkingPad",
+                "description": "Found {name} ({mac}). Choose a name for it.",
+                "data": {
+                    "name": "Name"
+                }
             }
+        },
+        "error": {
+            "invalid_mac": "Invalid Bluetooth address, expected format AA:BB:CC:DD:EE:FF."
         },
         "abort": {
             "already_configured": "This device is already configured."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "WalkingPad options",
+                "data": {
+                    "scan_interval": "Poll interval (seconds)"
+                },
+                "data_description": {
+                    "scan_interval": "How often the treadmill is asked for its status. Changes made on the device or remote show up after at most this time."
+                }
+            }
+        }
+    },
+    "entity": {
+        "number": {
+            "speed": {
+                "name": "Speed"
+            }
+        },
+        "sensor": {
+            "distance": {
+                "name": "Distance"
+            },
+            "duration": {
+                "name": "Duration"
+            },
+            "speed": {
+                "name": "Speed"
+            },
+            "steps": {
+                "name": "Steps"
+            },
+            "step_cadence": {
+                "name": "Step cadence"
+            },
+            "total_distance": {
+                "name": "Total distance"
+            },
+            "total_time": {
+                "name": "Total time"
+            },
+            "total_steps": {
+                "name": "Total steps"
+            }
         }
     },
     "device_automation": {

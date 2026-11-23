@@ -8,12 +8,15 @@ Dieses Repo ist ein gepflegter Fork von [indiefan/king_smith](https://github.com
 
 - **Schalter** für das Laufband (Start/Stop)
 - **Number-Entity** für die Geschwindigkeit (km/h)
-- **Sensoren** für Distanz, Zeit, Geschwindigkeit und Schritte
+- **Sensoren** für Distanz, Dauer, Geschwindigkeit, Schritte und Schrittfrequenz der aktuellen Sitzung
+- **Gesamtsensoren** für Distanz, Zeit und Schritte, die über Neustarts hinweg weiterzählen
 - **Geräte-Trigger** `Sitzung gestartet` und `Sitzung beendet` für Automationen
+- **Einstellbares Abfrageintervall** (Standard 5 s) unter *Konfigurieren*
+- **Diagnose-Download** für Fehlerberichte
 
 ## Voraussetzungen
 
-- Home Assistant **2024.4** oder neuer
+- Home Assistant **2025.1** oder neuer
 - Bluetooth in Home Assistant: ein lokaler Adapter oder ein [ESP32 als Bluetooth-Proxy](https://esphome.io/components/bluetooth_proxy.html) in Reichweite des Laufbands
 - Das Laufband ist an und **nicht** mit einem anderen Gerät verbunden (Handy-App, Mac, ...). Es akzeptiert nur eine BLE-Verbindung gleichzeitig.
 
@@ -37,6 +40,8 @@ Den Ordner `custom_components/king_smith` in das Konfigurationsverzeichnis von H
 1. **Einstellungen → Geräte & Dienste.** Wird das Laufband per Bluetooth erkannt, erscheint es unter **Entdeckt**. Auf **Konfigurieren** klicken, einen Namen vergeben, fertig.
 2. Erscheint nichts: **Integration hinzufügen → King Smith Walking Pad** und Name sowie Bluetooth-Adresse (MAC) manuell eintragen. Die Adresse zeigt Home Assistant unter **Einstellungen → Geräte & Dienste → Bluetooth → Konfigurieren → Advertisement Monitor** beim Gerät `WalkingPad` (oder `KS-...`).
 
+Das Abfrageintervall lässt sich später unter **Einstellungen → Geräte & Dienste → King Smith Walking Pad → Konfigurieren** ändern. Das Laufband meldet seinen Status nur auf Anfrage; Änderungen am Gerät oder per Fernbedienung erscheinen spätestens nach diesem Intervall.
+
 Erkannt werden Geräte mit dem Bluetooth-Namen `WalkingPad`, `KS-BL*` und `KS-ST-*`.
 
 ## Getestet
@@ -53,6 +58,12 @@ Läuft es mit einem weiteren Modell, gerne ein Issue anlegen.
 - Deutsche und englische Texte für den Einrichtungsdialog
 - Import von `UnitOfTime` auf `homeassistant.const` umgestellt
 - Entwicklungsballast aus dem Template entfernt (Devcontainer, Skripte, Lint-Workflow)
+- Eigene, schlanke Bluetooth-Anbindung über die BLE-Verbindung von Home Assistant (`bleak-retry-connector`, funktioniert auch über ESPHome-Proxys) statt `ph4-walkingpad`. Keine zusätzlichen Python-Pakete mehr nötig
+- Ein zentrales Polling statt einer eigenen Abfrage pro Entity. Befehle werden sauber nacheinander gesendet
+- Geräte-Trigger repariert (vorher schlug das Speichern der Automation fehl und die Events passten nie)
+- Gesamtsensoren zählen nach einem Neustart nicht mehr doppelt
+- Wechselt der Bluetooth-Adapter oder Proxy, wird das automatisch übernommen
+- Entity-Namen übersetzt (de/en); Entity-IDs und Unique-IDs bleiben unverändert
 
 ## Credits und Lizenz
 

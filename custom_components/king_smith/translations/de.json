@@ -1,17 +1,74 @@
 {
     "config": {
+        "flow_title": "{name}",
         "step": {
-            "device": {
+            "user": {
                 "title": "WalkingPad einrichten",
-                "description": "Name und Bluetooth-Adresse des Laufbands eingeben.",
+                "description": "Ein per Bluetooth gefundenes Laufband auswählen oder die Bluetooth-Adresse eingeben (z. B. AA:BB:CC:DD:EE:FF).",
                 "data": {
                     "name": "Name",
                     "mac": "Bluetooth-Adresse"
                 }
+            },
+            "bluetooth_confirm": {
+                "title": "WalkingPad einrichten",
+                "description": "{name} ({mac}) gefunden. Namen für das Laufband vergeben.",
+                "data": {
+                    "name": "Name"
+                }
             }
+        },
+        "error": {
+            "invalid_mac": "Ungültige Bluetooth-Adresse, erwartet wird AA:BB:CC:DD:EE:FF."
         },
         "abort": {
             "already_configured": "Dieses Gerät ist bereits eingerichtet."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "WalkingPad-Optionen",
+                "data": {
+                    "scan_interval": "Abfrageintervall (Sekunden)"
+                },
+                "data_description": {
+                    "scan_interval": "Wie oft der Status des Laufbands abgefragt wird. Änderungen am Gerät oder per Fernbedienung erscheinen spätestens nach dieser Zeit."
+                }
+            }
+        }
+    },
+    "entity": {
+        "number": {
+            "speed": {
+                "name": "Geschwindigkeit"
+            }
+        },
+        "sensor": {
+            "distance": {
+                "name": "Distanz"
+            },
+            "duration": {
+                "name": "Dauer"
+            },
+            "speed": {
+                "name": "Geschwindigkeit"
+            },
+            "steps": {
+                "name": "Schritte"
+            },
+            "step_cadence": {
+                "name": "Schrittfrequenz"
+            },
+            "total_distance": {
+                "name": "Gesamtdistanz"
+            },
+            "total_time": {
+                "name": "Gesamtzeit"
+            },
+            "total_steps": {
+                "name": "Schritte gesamt"
+            }
         }
     },
     "device_automation": {

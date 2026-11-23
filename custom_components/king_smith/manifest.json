@@ -21,11 +21,9 @@
         "bluetooth"
     ],
     "documentation": "https://github.com/DapDallas/king_smith_laufband",
+    "integration_type": "device",
     "iot_class": "local_polling",
     "issue_tracker": "https://github.com/DapDallas/king_smith_laufband/issues",
-    "requirements": [
-        "bleak>=0.18.0",
-        "ph4-walkingpad>=0.0.7"
-    ],
-    "version": "0.2.0"
+    "requirements": [],
+    "version": "0.3.0"
 }

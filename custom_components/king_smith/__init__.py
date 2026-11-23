@@ -1,64 +1,64 @@
-"""The Walkingpad integration."""
+"""The King Smith WalkingPad integration."""
+
 from __future__ import annotations
-import logging
 
-
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.components import bluetooth
-from homeassistant.const import Platform, CONF_NAME, CONF_MAC
-from homeassistant.core import HomeAssistant
+from homeassistant.const import CONF_MAC, Platform
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from .const import DOMAIN
-from .coordinator import WalkingPadCoordinator
-from .walking_pad import WalkingPadApi
+from .coordinator import WalkingPadConfigEntry, WalkingPadCoordinator
 
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.SENSOR]
-
-_LOGGER = logging.getLogger(__name__)
+PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Walkingpad from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-    address = entry.data.get(CONF_MAC)
-
-    ble_device = bluetooth.async_ble_device_from_address(
-        hass, entry.data.get(CONF_MAC), connectable=True
-    )
+async def async_setup_entry(hass: HomeAssistant, entry: WalkingPadConfigEntry) -> bool:
+    """Set up a WalkingPad from a config entry."""
+    mac = entry.data[CONF_MAC].upper()
+    ble_device = bluetooth.async_ble_device_from_address(hass, mac, connectable=True)
     if ble_device is None:
-        # Check if any HA scanner on:
-        count_scanners = bluetooth.async_scanner_count(hass, connectable=True)
-        if count_scanners < 1:
+        if bluetooth.async_scanner_count(hass, connectable=True) < 1:
             raise ConfigEntryNotReady(
-                "No bluetooth scanner detected. \
-                Enable the bluetooth integration or ensure an esphome device \
-                is running as a bluetooth proxy"
+                "No Bluetooth adapter or proxy found. Enable the Bluetooth "
+                "integration or set up an ESPHome Bluetooth proxy."
             )
-        raise ConfigEntryNotReady(f"Could not find Walkingpad with address {address}")
+        raise ConfigEntryNotReady(f"WalkingPad {mac} not found, is it switched on?")
 
-    name = entry.data.get(CONF_NAME) or DOMAIN
-    walking_pad = WalkingPadApi(name, ble_device)
+    coordinator = WalkingPadCoordinator(hass, entry, ble_device)
+    await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = coordinator
 
-    hass.data[DOMAIN][entry.entry_id] = {
-        "device": walking_pad,
-        "coordinator": WalkingPadCoordinator(hass, walking_pad, entry.entry_id),
-    }
+    @callback
+    def _advertisement(
+        service_info: bluetooth.BluetoothServiceInfoBleak,
+        _change: bluetooth.BluetoothChange,
+    ) -> None:
+        coordinator.api.set_ble_device(service_info.device)
+
+    entry.async_on_unload(
+        bluetooth.async_register_callback(
+            hass,
+            _advertisement,
+            bluetooth.BluetoothCallbackMatcher(address=mac, connectable=True),
+            bluetooth.BluetoothScanningMode.PASSIVE,
+        )
+    )
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def _async_options_updated(
+    hass: HomeAssistant, entry: WalkingPadConfigEntry
+) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: WalkingPadConfigEntry) -> bool:
     """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
-
-    bluetooth.async_rediscover_address(hass, entry.data.get(CONF_MAC))
-
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        await entry.runtime_data.async_shutdown()
+        bluetooth.async_rediscover_address(hass, entry.data[CONF_MAC].upper())
     return unload_ok
-
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry."""
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)
